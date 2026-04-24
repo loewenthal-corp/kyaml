@@ -1,0 +1,96 @@
+---
+version: "3"
+
+vars:
+  CPU_COUNT:
+    sh: nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "4"
+  PARALLEL_COUNT:
+    sh: echo $(({{.CPU_COUNT}} * 2))
+
+tasks:
+  do:
+    desc: "Run all quality checks (build, lint, format, test)"
+    cmds:
+      - task: build
+      - task: lint
+      - task: format
+      - task: test
+
+  format:
+    desc: "Format Go code"
+    aliases: [fmt, f]
+    dir: "{{.TASKFILE_DIR}}"
+    sources:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+    cmds:
+      - go fmt ./...
+
+  lint:
+    desc: "Lint Go code"
+    aliases: [l]
+    dir: "{{.TASKFILE_DIR}}"
+    sources:
+      - "**/*.go"
+    cmds:
+      - go vet -p {{.CPU_COUNT}} ./...
+
+  build:
+    desc: "Build kyaml binary"
+    dir: "{{.TASKFILE_DIR}}"
+    sources:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+    cmds:
+      - go build ./...
+      - go build -o kyaml ./cmd/kyaml/
+
+  install:
+    desc: "Build and install kyaml to ~/go/bin"
+    dir: "{{.TASKFILE_DIR}}"
+    deps: [build]
+    cmds:
+      - cp kyaml {{.HOME}}/go/bin/kyaml
+
+  test:
+    desc: "Run Go tests (fast)"
+    aliases: [t]
+    cmds:
+      - task: test::fast
+
+  test::fast:
+    desc: "Fast tests (no race detection)"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -p {{.CPU_COUNT}} -parallel {{.PARALLEL_COUNT}} ./...
+
+  test::ci:
+    desc: "CI test suite (full tests with race detection)"
+    cmds:
+      - task: test::full
+
+  test::full:
+    desc: "Full test suite with race detection"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -race -p {{.CPU_COUNT}} -parallel {{.PARALLEL_COUNT}} -cover ./...
+
+  test::coverage-html:
+    desc: "Generate HTML coverage report"
+    dir: "{{.TASKFILE_DIR}}"
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  check:
+    desc: "Quick validation (lint + fast test)"
+    cmds:
+      - task: lint
+      - task: test::fast
+
+  clean:
+    desc: "Clean build artifacts and test cache"
+    cmds:
+      - rm -rf coverage.out coverage.html kyaml
